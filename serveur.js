@@ -228,7 +228,7 @@ function broadcastToAndroid(data) {
 testConnection()
   .then(() => initDatabase())
   .then(() => {
-    const PORT = parseInt(process.env.PORT || 3000);
+   const PORT = parseInt(process.env.PORT || 10000);
     app.listen(PORT, () => {
       console.log(`🚀 Serveur HTTP démarré sur le port ${PORT}`);
       console.log(`🔌 WebSocket sur le port ${WS_PORT}`);
