@@ -17,17 +17,13 @@ app.use(cors());
 // ========================================
 // 🗄️ CONFIGURATION POSTGRESQL (NEON COMPATIBLE)
 // ========================================
-const isProduction = process.env.NODE_ENV === 'production';
-
 const poolConfig = {
   connectionString: process.env.DATABASE_URL,
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
+  ssl: { rejectUnauthorized: false }
 };
-
-// SSL uniquement en production (Render)
-poolConfig.ssl = { rejectUnauthorized: false };
 
 const pool = new Pool(poolConfig);
 
@@ -104,6 +100,180 @@ function generateLampId() {
 }
 
 // ========================================
+// 📡 ROUTES HTTP/API
+// ========================================
+
+// ✅ GET /api/lampadaires - Récupérer tous les lampadaires
+app.get('/api/lampadaires', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM lampadaires ORDER BY created_at DESC'
+    );
+    console.log(`📊 GET /api/lampadaires - ${result.rows.length} lampadaires trouvés`);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('❌ Erreur GET /api/lampadaires:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// ✅ GET /api/lampadaire/:id - Récupérer un lampadaire par ID
+app.get('/api/lampadaire/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('SELECT * FROM lampadaires WHERE id = $1', [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Lampadaire non trouvé' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('❌ Erreur GET /api/lampadaire/:id:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// ✅ POST /api/lampadaire/install - Installer un nouveau lampadaire
+app.post('/api/lampadaire/install', async (req, res) => {
+  try {
+    const { mac, latitude, longitude, altitude, lieu_installation, date_installation } = req.body;
+
+    // Validation
+    if (!mac || !latitude || !longitude) {
+      return res.status(400).json({ 
+        error: 'Données manquantes', 
+        required: ['mac', 'latitude', 'longitude'] 
+      });
+    }
+
+    // Vérifier si MAC existe déjà
+    const existing = await pool.query('SELECT id FROM lampadaires WHERE mac = $1', [mac]);
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ 
+        error: 'MAC déjà enregistrée',
+        id: existing.rows[0].id
+      });
+    }
+
+    // Générer ID et Token
+    const lampId = generateLampId();
+    const token = generateToken();
+
+    // Insérer dans la base
+    await pool.query(
+      `INSERT INTO lampadaires 
+       (id, mac, latitude, longitude, altitude, lieu_installation, date_installation, token, status, created_at) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'OFF', NOW())`,
+      [lampId, mac, latitude, longitude, altitude || 0.0, lieu_installation || 'Non spécifié', date_installation, token]
+    );
+
+    console.log(`✅ Lampadaire installé: ${lampId} (MAC: ${mac})`);
+
+    // Broadcast aux clients Android
+    broadcastToAndroid({
+      type: 'lamp_added',
+      lamp: {
+        id: lampId,
+        mac,
+        latitude,
+        longitude,
+        altitude,
+        lieu_installation,
+        date_installation,
+        status: 'OFF'
+      }
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Lampadaire installé avec succès',
+      id: lampId,
+      token: token
+    });
+
+  } catch (error) {
+    console.error('❌ Erreur POST /api/lampadaire/install:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// ✅ PUT /api/lampadaire/:id - Mettre à jour un lampadaire
+app.put('/api/lampadaire/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { latitude, longitude, altitude, lieu_installation, status } = req.body;
+
+    const result = await pool.query(
+      `UPDATE lampadaires 
+       SET latitude = COALESCE($1, latitude),
+           longitude = COALESCE($2, longitude),
+           altitude = COALESCE($3, altitude),
+           lieu_installation = COALESCE($4, lieu_installation),
+           status = COALESCE($5, status),
+           last_update = NOW()
+       WHERE id = $6
+       RETURNING *`,
+      [latitude, longitude, altitude, lieu_installation, status, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Lampadaire non trouvé' });
+    }
+
+    console.log(`✅ Lampadaire mis à jour: ${id}`);
+    
+    // Broadcast aux clients Android
+    broadcastToAndroid({
+      type: 'lamp_updated',
+      lamp: result.rows[0]
+    });
+
+    res.json({ success: true, lamp: result.rows[0] });
+
+  } catch (error) {
+    console.error('❌ Erreur PUT /api/lampadaire/:id:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// ✅ DELETE /api/lampadaire/:id - Supprimer un lampadaire
+app.delete('/api/lampadaire/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query('DELETE FROM lampadaires WHERE id = $1 RETURNING id', [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Lampadaire non trouvé' });
+    }
+
+    console.log(`✅ Lampadaire supprimé: ${id}`);
+
+    // Broadcast aux clients Android
+    broadcastToAndroid({
+      type: 'lamp_deleted',
+      lampId: id
+    });
+
+    res.json({ success: true, message: 'Lampadaire supprimé' });
+
+  } catch (error) {
+    console.error('❌ Erreur DELETE /api/lampadaire/:id:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// ✅ Route de santé
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
+// ========================================
 // 🌐 WEBSOCKET SERVER
 // ========================================
 const WS_PORT = parseInt(process.env.WS_PORT || 10000);
@@ -122,7 +292,6 @@ wss.on('connection', (ws, req) => {
         case 'register': await handleRegister(ws, data); break;
         case 'esp_data': await handleEspData(data); break;
         case 'command': handleCommand(data); break;
-        case 'alert': console.log('⚠️ Alert handler supprimé.'); break;
         case 'interval_confirm': broadcastToAndroid(data); break;
         default: console.log(`⚠️ Type inconnu: ${data.type}`);
       }
@@ -214,7 +383,7 @@ function handleCommand(data) {
 }
 
 // ========================================
-// 🔄 BROADCAST VERS ANDROID
+// 📄 BROADCAST VERS ANDROID
 // ========================================
 function broadcastToAndroid(data) {
   androidClients.forEach(ws => {
@@ -228,11 +397,12 @@ function broadcastToAndroid(data) {
 testConnection()
   .then(() => initDatabase())
   .then(() => {
-   const PORT = parseInt(process.env.PORT || 10000);
+    const PORT = parseInt(process.env.PORT || 10000);
     app.listen(PORT, () => {
       console.log(`🚀 Serveur HTTP démarré sur le port ${PORT}`);
       console.log(`🔌 WebSocket sur le port ${WS_PORT}`);
-      console.log(`🌍 Mode: ${isProduction ? 'PRODUCTION' : 'DÉVELOPPEMENT'}`);
+      console.log(`🌐 URL API: http://localhost:${PORT}/api/lampadaires`);
+      console.log(`📡 Mode: PRODUCTION`);
     });
   })
   .catch(error => {
