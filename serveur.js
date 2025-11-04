@@ -375,20 +375,44 @@ async function handleEspData(data) {
 }
 
 function handleCommand(data) {
-  if (data.idLampadaire) {
+  const targetLampId = data.idLampadaire;
+  
+  if (targetLampId && targetLampId !== "0") {
+    // ✅ Commande pour un lampadaire spécifique
+    let sent = false;
+    
     for (const [mac, client] of espClients.entries()) {
-      if (client.lampId === data.idLampadaire && client.ws.readyState === WebSocket.OPEN) {
+      // ✅ Convertir en String pour comparer
+      if (String(client.lampId) === String(targetLampId) && 
+          client.ws.readyState === WebSocket.OPEN) {
+        
         client.ws.send(JSON.stringify(data));
+        console.log(`✅ Commande ${data.command} envoyée à LAMP${targetLampId} (MAC: ${mac})`);
+        sent = true;
+        break;
       }
     }
+    
+    if (!sent) {
+      console.warn(`⚠️ Lampadaire LAMP${targetLampId} non connecté`);
+    }
   } else {
+    // ✅ Commande pour TOUS les lampadaires
+    let count = 0;
     for (const [mac, client] of espClients.entries()) {
       if (client.ws.readyState === WebSocket.OPEN) {
         client.ws.send(JSON.stringify(data));
+        count++;
       }
     }
+    console.log(`✅ Commande ${data.command} envoyée à ${count} lampadaires`);
   }
-  broadcastToAndroid({ type: 'command_sent', command: data.command });
+  
+  broadcastToAndroid({ 
+    type: 'command_sent', 
+    command: data.command,
+    lampId: targetLampId 
+  });
 }
 
 function broadcastToAndroid(data) {
