@@ -123,10 +123,8 @@ app.get('/api/lampadaires', async (req, res) => {
     
     // CORRECTION : Mettre à jour le statut avant de renvoyer
     const lampadaires = result.rows.map(lamp => {
-      // Si le lampadaire est connecté via WebSocket
       const isConnected = Array.from(espClients.keys()).includes(lamp.mac);
       
-      // Si connecté mais status = OFF → changer en CONNECTED
       if (isConnected && lamp.status === 'OFF') {
         lamp.status = 'CONNECTED';
       } else if (!isConnected) {
@@ -180,7 +178,6 @@ app.post('/api/lampadaire/install', async (req, res) => {
       });
     }
 
-    // Vérifier si MAC existe
     const existing = await pool.query('SELECT id FROM lampadaires WHERE mac = $1', [mac]);
     if (existing.rows.length > 0) {
       return res.status(409).json({
@@ -217,13 +214,12 @@ app.post('/api/lampadaire/install', async (req, res) => {
   }
 });
 
-// PUT /api/lampadaire/:id - CORRIGÉ & DYNAMIQUE
+// PUT /api/lampadaire/:id
 app.put('/api/lampadaire/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { latitude, longitude, altitude, lieu_installation, status } = req.body;
 
-    // Construction dynamique des champs à mettre à jour
     const updates = [];
     const values = [];
     let paramIndex = 1;
@@ -249,15 +245,12 @@ app.put('/api/lampadaire/:id', async (req, res) => {
       values.push(status);
     }
 
-    // Toujours mettre à jour last_update
     updates.push(`last_update = NOW()`);
 
-    // Si aucun champ à mettre à jour → erreur
-    if (updates.length === 1) { // seulement last_update
+    if (updates.length === 1) {
       return res.status(400).json({ error: 'Aucun champ à mettre à jour' });
     }
 
-    // Ajouter l'ID pour le WHERE
     values.push(id);
     const query = `
       UPDATE lampadaires
@@ -272,9 +265,7 @@ app.put('/api/lampadaire/:id', async (req, res) => {
       return res.status(404).json({ error: 'Lampadaire non trouvé' });
     }
 
-    // Notifier Android
     broadcastToAndroid({ type: 'lamp_updated', lamp: result.rows[0] });
-
     res.json({ success: true, lamp: result.rows[0] });
   } catch (error) {
     console.error('Erreur PUT /api/lampadaire/:id:', error.message);
@@ -326,44 +317,41 @@ wss.on('connection', (ws, req) => {
     }
   });
 
-  // GESTION DE LA DÉCONNEXION
+  // GESTION DÉCONNEXION ESP32 - CORRECTION COMPLÈTE
   ws.on('close', async () => {
-    // Détecter quel ESP32 s'est déconnecté
     for (const [mac, client] of espClients.entries()) {
       if (client.ws === ws) {
         console.log(`ESP32 déconnecté: ${mac}`);
-        
-        // Mettre à jour le statut en BD
+
         try {
           await pool.query(
-            'UPDATE lampadaires SET status = $1, last_update = NOW() WHERE mac = $2',
-            ['HORS_LIGNE', mac]
+            'UPDATE lampadaires SET status = $1, signal = $2, last_update = NOW() WHERE mac = $3',
+            ['HORS_LIGNE', 0, mac]
           );
-          
-          // Notifier Android
+          console.log(`BD mise à jour: ${mac} → HORS_LIGNE`);
+
           broadcastToAndroid({
             type: 'lamp_disconnected',
             lampId: client.lampId,
             mac: mac,
-            status: 'HORS_LIGNE'
+            status: 'HORS_LIGNE',
+            signal: 0,
+            timestamp: new Date().toISOString()
           });
-          
         } catch (error) {
           console.error('Erreur update déconnexion:', error.message);
         }
-        
+
         espClients.delete(mac);
         break;
       }
     }
-    
-    // Retirer Android clients
+
     androidClients = androidClients.filter(c => c !== ws);
   });
 
   ws.on('error', (error) => console.error('Erreur WebSocket:', error.message));
 
-  // Ping pour garder la connexion vivante
   const pingInterval = setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'ping' }));
@@ -376,7 +364,7 @@ wss.on('connection', (ws, req) => {
 // ========================================
 // HANDLERS WEBSOCKET
 // ========================================
-// AMÉLIORÉ : Mise à jour statut + notification
+// AMÉLIORÉ : FORCER STATUS = CONNECTED + SIGNAL
 async function handleRegister(ws, data) {
   if (data.clientType === 'android') {
     androidClients.push(ws);
@@ -390,28 +378,29 @@ async function handleRegister(ws, data) {
       if (result.rows.length > 0) {
         const lamp = result.rows[0];
         espClients.set(data.mac, { ws, lampId: lamp.id, token: lamp.token });
-        
-        // METTRE À JOUR LE STATUT EN "CONNECTED"
+
+        // FORCER STATUS = "CONNECTED" + SIGNAL > 0
         await pool.query(
-          'UPDATE lampadaires SET status = $1, last_update = NOW() WHERE mac = $2',
-          ['CONNECTED', data.mac]
+          'UPDATE lampadaires SET status = $1, signal = $2, last_update = NOW() WHERE mac = $3',
+          ['CONNECTED', -50, data.mac]
         );
-        
+
         ws.send(JSON.stringify({
           type: 'welcome',
           lampId: lamp.id,
           token: lamp.token,
           status: 'CONNECTED'
         }));
-        
-        // Notifier Android de la connexion
+
         broadcastToAndroid({
           type: 'lamp_connected',
           lampId: lamp.id,
           mac: data.mac,
-          status: 'CONNECTED'
+          status: 'CONNECTED',
+          signal: -50
         });
-        
+
+        console.log(`ESP32 ${data.mac} enregistré → CONNECTED`);
       } else {
         ws.send(JSON.stringify({
           type: 'error',
@@ -425,12 +414,19 @@ async function handleRegister(ws, data) {
   }
 }
 
+// AMÉLIORÉ : MISE À JOUR SIGNAL + STATUS
 async function handleEspData(data) {
   try {
+    const lampId = data.idLampadaire;
+    const state = data.state; // "ON" ou "OFF"
+    const signal = data.signal || -50;
+
     await pool.query(
-      'UPDATE lampadaires SET status = $1, last_update = NOW() WHERE id = $2',
-      [data.state, data.idLampadaire]
+      'UPDATE lampadaires SET status = $1, signal = $2, last_update = NOW() WHERE id = $3',
+      [state, signal, lampId]
     );
+
+    console.log(`ESP Data: LAMP${lampId} → ${state} (${signal} dBm)`);
     broadcastToAndroid(data);
   } catch (error) {
     console.error('Erreur esp_data:', error.message);
@@ -490,7 +486,6 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`Serveur démarré sur le port ${PORT}`);
   console.log(`WebSocket actif sur le même port`);
 
-  // Initialiser DB en arrière-plan
   testConnection().then(connected => {
     if (connected) {
       initDatabase();
