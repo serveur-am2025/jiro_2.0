@@ -377,7 +377,7 @@ async function handleRegister(ws, data) {
   if (data.clientType === 'esp32' && data.mac) {
     try {
       const result = await pool.query(
-        'SELECT id, token, status FROM lampadaires WHERE mac = $1',
+        'SELECT id, token, status, latitude, longitude, lieu_installation FROM lampadaires WHERE mac = $1',
         [data.mac]
       );
       if (result.rows.length > 0) {
@@ -387,12 +387,18 @@ async function handleRegister(ws, data) {
           'UPDATE lampadaires SET status = $1, signal = $2, last_update = NOW() WHERE mac = $3',
           ['CONNECTED', -50, data.mac]
         );
+        
+        // ✅ ENVOYER LES COORDONNÉES À L'ESP32
         ws.send(JSON.stringify({
           type: 'welcome',
           lampId: lamp.id,
           token: lamp.token,
-          status: 'CONNECTED'
+          status: 'CONNECTED',
+          latitude: lamp.latitude,        // ✅ AJOUTÉ
+          longitude: lamp.longitude,      // ✅ AJOUTÉ
+          lieu: lamp.lieu_installation    // ✅ AJOUTÉ
         }));
+        
         broadcastToAndroid({
           type: 'lamp_connected',
           lampId: lamp.id,
