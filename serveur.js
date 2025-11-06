@@ -305,8 +305,21 @@ wss.on('connection', (ws, req) => {
           console.log(`Lampadaire: ${data.idLampadaire}`);
           console.log(`État: ${data.lampState}, LDR: ${data.ldr || 'N/A'}`);
           
-          // BROADCASTER À TOUS LES CLIENTS ANDROID
-          broadcastToAndroid(data);
+          // BROADCASTER AVEC LE BON FORMAT
+          const alertPayload = {
+            type: 'alert',
+            idLampadaire: data.idLampadaire,
+            titre: data.titre,
+            message: data.message,
+            lampState: data.lampState,
+            timestamp: data.timestamp || new Date().toISOString(),
+            ldr: data.ldr || 0,
+            latitude: data.latitude || 0,
+            longitude: data.longitude || 0,
+            lieu: data.lieu || 'Unknown'
+          };
+          
+          broadcastToAndroid(alertPayload);
           break;
         default:
           console.log(`Type de message inconnu: ${data.type}`);
@@ -444,9 +457,12 @@ function handleCommand(data) {
   });
 }
 
+// FONCTION BROADCAST CORRIGÉE
 function broadcastToAndroid(data) {
   const payload = JSON.stringify(data);
   console.log(`Broadcasting à ${androidClients.length} clients Android`);
+  console.log(`Payload: ${payload}`); // LOG AJOUTÉ
+  
   androidClients.forEach(ws => {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(payload);
