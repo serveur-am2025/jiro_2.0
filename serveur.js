@@ -24,21 +24,22 @@ const poolConfig = {
   connectionTimeoutMillis: 10000,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 };
+
 const pool = new Pool(poolConfig);
 
 async function testConnection() {
   try {
     const client = await pool.connect();
-    console.log('✅ PostgreSQL connecté à Neon');
+    console.log('PostgreSQL connecté à Neon');
     client.release();
     return true;
   } catch (error) {
-    console.error('❌ Erreur connexion PostgreSQL:', error.message);
+    console.error('Erreur connexion PostgreSQL:', error.message);
     return false;
   }
 }
 
-pool.on('error', (err) => console.error('❌ Erreur PostgreSQL inattendue:', err.message));
+pool.on('error', (err) => console.error('Erreur PostgreSQL inattendue:', err.message));
 
 // ========================================
 // INITIALISATION BASE DE DONNÉES
@@ -64,14 +65,13 @@ async function initDatabase() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
-
-    await client.query(`CREATE INDEX IF NOT EXISTS idx_mac ON lampadaires(mac)`);
-    await client.query(`CREATE INDEX IF NOT EXISTS idx_status ON lampadaires(status)`);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_mac ON lampadaires(mac)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_status ON lampadaires(status)');
     await client.query('COMMIT');
-    console.log('✅ Base de données initialisée avec succès');
+    console.log('Base de données initialisée avec succès');
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('❌ Erreur initialisation base:', error.message);
+    console.error('Erreur initialisation base:', error.message);
   } finally {
     client.release();
   }
@@ -101,7 +101,7 @@ let androidClients = [];        // Tableau de WebSocket Android
 app.get('/', (req, res) => {
   res.json({
     status: 'OK',
-    message: '🚀 Serveur Lampadaire IoT',
+    message: 'Serveur Lampadaire IoT',
     endpoints: [
       'GET /api/lampadaires',
       'GET /api/lampadaire/:id',
@@ -127,7 +127,6 @@ app.get('/api/lampadaires', async (req, res) => {
     const result = await pool.query(
       'SELECT * FROM lampadaires ORDER BY created_at DESC'
     );
-
     const lampadaires = result.rows.map(lamp => {
       const isConnected = espClients.has(lamp.mac);
       if (isConnected && lamp.status === 'OFF') {
@@ -137,11 +136,10 @@ app.get('/api/lampadaires', async (req, res) => {
       }
       return lamp;
     });
-
-    console.log(`✅ GET /api/lampadaires - ${lampadaires.length} lampadaires`);
+    console.log(`GET /api/lampadaires - ${lampadaires.length} lampadaires`);
     res.json(lampadaires);
   } catch (error) {
-    console.error('❌ Erreur GET /api/lampadaires:', error.message);
+    console.error('Erreur GET /api/lampadaires:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -151,11 +149,9 @@ app.get('/api/lampadaire/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query('SELECT * FROM lampadaires WHERE id = $1', [id]);
-
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Lampadaire non trouvé' });
     }
-
     const lamp = result.rows[0];
     const isConnected = espClients.has(lamp.mac);
     if (isConnected && lamp.status === 'OFF') {
@@ -163,10 +159,9 @@ app.get('/api/lampadaire/:id', async (req, res) => {
     } else if (!isConnected) {
       lamp.status = 'HORS_LIGNE';
     }
-
     res.json(lamp);
   } catch (error) {
-    console.error('❌ Erreur GET /api/lampadaire/:id:', error.message);
+    console.error('Erreur GET /api/lampadaire/:id:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -175,14 +170,12 @@ app.get('/api/lampadaire/:id', async (req, res) => {
 app.post('/api/lampadaire/install', async (req, res) => {
   try {
     const { mac, latitude, longitude, altitude, lieu_installation, date_installation } = req.body;
-
     if (!mac || !latitude || !longitude) {
       return res.status(400).json({
         error: 'Données manquantes',
         required: ['mac', 'latitude', 'longitude']
       });
     }
-
     const existing = await pool.query('SELECT id FROM lampadaires WHERE mac = $1', [mac]);
     if (existing.rows.length > 0) {
       return res.status(409).json({
@@ -190,23 +183,19 @@ app.post('/api/lampadaire/install', async (req, res) => {
         id: existing.rows[0].id
       });
     }
-
     const lampId = generateLampId();
     const token = generateToken();
-
     await pool.query(
-      `INSERT INTO lampadaires
-       (id, mac, latitude, longitude, altitude, lieu_installation, date_installation, token, status, created_at)
+      `INSERT INTO lampadaires 
+       (id, mac, latitude, longitude, altitude, lieu_installation, date_installation, token, status, created_at) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'OFF', NOW())`,
       [lampId, mac, latitude, longitude, altitude || 0.0, lieu_installation || 'Non spécifié', date_installation, token]
     );
-
-    console.log(`✅ Lampadaire installé: ${lampId} (MAC: ${mac})`);
+    console.log(`Lampadaire installé: ${lampId} (MAC: ${mac})`);
     broadcastToAndroid({
       type: 'lamp_added',
       lamp: { id: lampId, mac, latitude, longitude, status: 'OFF' }
     });
-
     res.status(200).json({
       success: true,
       message: 'Lampadaire installé avec succès',
@@ -214,7 +203,7 @@ app.post('/api/lampadaire/install', async (req, res) => {
       token: token
     });
   } catch (error) {
-    console.error('❌ Erreur POST /api/lampadaire/install:', error.message);
+    console.error('Erreur POST /api/lampadaire/install:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -224,7 +213,6 @@ app.put('/api/lampadaire/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { latitude, longitude, altitude, lieu_installation, status } = req.body;
-
     const updates = [];
     const values = [];
     let paramIndex = 1;
@@ -236,28 +224,25 @@ app.put('/api/lampadaire/:id', async (req, res) => {
     if (status !== undefined) { updates.push(`status = $${paramIndex++}`); values.push(status); }
 
     updates.push(`last_update = NOW()`);
-
     if (updates.length === 1) {
       return res.status(400).json({ error: 'Aucun champ à mettre à jour' });
     }
 
     values.push(id);
     const query = `
-      UPDATE lampadaires
-      SET ${updates.join(', ')}
-      WHERE id = $${paramIndex}
+      UPDATE lampadaires 
+      SET ${updates.join(', ')} 
+      WHERE id = $${paramIndex} 
       RETURNING *
     `;
-
     const result = await pool.query(query, values);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Lampadaire non trouvé' });
     }
-
     broadcastToAndroid({ type: 'lamp_updated', lamp: result.rows[0] });
     res.json({ success: true, lamp: result.rows[0] });
   } catch (error) {
-    console.error('❌ Erreur PUT /api/lampadaire/:id:', error.message);
+    console.error('Erreur PUT /api/lampadaire/:id:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -273,7 +258,7 @@ app.delete('/api/lampadaire/:id', async (req, res) => {
     broadcastToAndroid({ type: 'lamp_deleted', lampId: id });
     res.json({ success: true, message: 'Lampadaire supprimé' });
   } catch (error) {
-    console.error('❌ Erreur DELETE /api/lampadaire/:id:', error.message);
+    console.error('Erreur DELETE /api/lampadaire/:id:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -287,7 +272,7 @@ const wss = new WebSocket.Server({ server });
 
 wss.on('connection', (ws, req) => {
   const clientIp = req.socket.remoteAddress;
-  console.log(`🔌 Nouvelle connexion WebSocket depuis ${clientIp}`);
+  console.log(`Nouvelle connexion WebSocket depuis ${clientIp}`);
 
   // Ping toutes les 30 secondes
   const pingInterval = setInterval(() => {
@@ -301,7 +286,6 @@ wss.on('connection', (ws, req) => {
   ws.on('message', async (message) => {
     try {
       const data = JSON.parse(message.toString());
-
       switch (data.type) {
         case 'register':
           await handleRegister(ws, data);
@@ -316,25 +300,30 @@ wss.on('connection', (ws, req) => {
           broadcastToAndroid(data);
           break;
         case 'alert':
-          console.log(`🚨 Alerte reçue: ${data.titre} - ${data.message}`);
+          // LOG EXPLICITE POUR LES ALERTES
+          console.log(`Alerte reçue: ${data.titre} - ${data.message}`);
+          console.log(`Lampadaire: ${data.idLampadaire}`);
+          console.log(`État: ${data.lampState}, LDR: ${data.ldr || 'N/A'}`);
+          
+          // BROADCASTER À TOUS LES CLIENTS ANDROID
           broadcastToAndroid(data);
           break;
         default:
-          console.log(`⚠️ Type de message inconnu: ${data.type}`);
+          console.log(`Type de message inconnu: ${data.type}`);
       }
     } catch (error) {
-      console.error('❌ Erreur parsing message WebSocket:', error.message);
+      console.error('Erreur parsing message WebSocket:', error.message);
     }
   });
 
   ws.on('close', () => {
     clearInterval(pingInterval);
-    console.log(`🔌 Déconnexion WebSocket: ${clientIp}`);
+    console.log(`Déconnexion WebSocket: ${clientIp}`);
 
     // Vérifier si c'est un ESP32
     for (const [mac, client] of espClients.entries()) {
       if (client.ws === ws) {
-        console.log(`❌ ESP32 déconnecté: ${mac}`);
+        console.log(`ESP32 déconnecté: ${mac}`);
         pool.query(
           'UPDATE lampadaires SET status = $1, signal = $2, last_update = NOW() WHERE mac = $3',
           ['HORS_LIGNE', 0, mac]
@@ -347,19 +336,17 @@ wss.on('connection', (ws, req) => {
             signal: 0,
             timestamp: new Date().toISOString()
           });
-        }).catch(err => console.error('❌ Erreur mise à jour déconnexion:', err.message));
-
+        }).catch(err => console.error('Erreur mise à jour déconnexion:', err.message));
         espClients.delete(mac);
         break;
       }
     }
-
     // Retirer des clients Android
     androidClients = androidClients.filter(c => c !== ws);
   });
 
   ws.on('error', (error) => {
-    console.error('❌ Erreur WebSocket:', error.message);
+    console.error('Erreur WebSocket:', error.message);
   });
 });
 
@@ -369,8 +356,8 @@ wss.on('connection', (ws, req) => {
 async function handleRegister(ws, data) {
   if (data.clientType === 'android') {
     androidClients.push(ws);
-    ws.send(JSON.stringify({ type: 'welcome', message: '✅ Android connecté' }));
-    console.log('📱 Client Android enregistré');
+    ws.send(JSON.stringify({ type: 'welcome', message: 'Android connecté' }));
+    console.log('Client Android enregistré');
     return;
   }
 
@@ -380,23 +367,19 @@ async function handleRegister(ws, data) {
         'SELECT id, token, status FROM lampadaires WHERE mac = $1',
         [data.mac]
       );
-
       if (result.rows.length > 0) {
         const lamp = result.rows[0];
         espClients.set(data.mac, { ws, lampId: lamp.id, token: lamp.token });
-
         await pool.query(
           'UPDATE lampadaires SET status = $1, signal = $2, last_update = NOW() WHERE mac = $3',
           ['CONNECTED', -50, data.mac]
         );
-
         ws.send(JSON.stringify({
           type: 'welcome',
           lampId: lamp.id,
           token: lamp.token,
           status: 'CONNECTED'
         }));
-
         broadcastToAndroid({
           type: 'lamp_connected',
           lampId: lamp.id,
@@ -404,15 +387,14 @@ async function handleRegister(ws, data) {
           status: 'CONNECTED',
           signal: -50
         });
-
-        console.log(`✅ ESP32 enregistré: ${data.mac} → ${lamp.id}`);
+        console.log(`ESP32 enregistré: ${data.mac} → ${lamp.id}`);
       } else {
         ws.send(JSON.stringify({ type: 'error', message: 'MAC non enregistrée' }));
         ws.close();
-        console.log(`❌ ESP32 refusé: MAC ${data.mac} inconnu`);
+        console.log(`ESP32 refusé: MAC ${data.mac} inconnu`);
       }
     } catch (error) {
-      console.error('❌ Erreur handleRegister:', error.message);
+      console.error('Erreur handleRegister:', error.message);
       ws.send(JSON.stringify({ type: 'error', message: 'Erreur serveur' }));
     }
   }
@@ -421,33 +403,30 @@ async function handleRegister(ws, data) {
 async function handleEspData(data) {
   try {
     const { idLampadaire, state, signal = -50 } = data;
-
     await pool.query(
       'UPDATE lampadaires SET status = $1, signal = $2, last_update = NOW() WHERE id = $3',
       [state, signal, idLampadaire]
     );
-
-    console.log(`📊 Données ESP: ${idLampadaire} → ${state} (${signal} dBm)`);
+    console.log(`Données ESP: ${idLampadaire} → ${state} (${signal} dBm)`);
     broadcastToAndroid(data);
   } catch (error) {
-    console.error('❌ Erreur handleEspData:', error.message);
+    console.error('Erreur handleEspData:', error.message);
   }
 }
 
 function handleCommand(data) {
   const targetLampId = data.idLampadaire;
-
   if (targetLampId && targetLampId !== "0") {
     let sent = false;
     for (const [mac, client] of espClients.entries()) {
       if (String(client.lampId) === String(targetLampId) && client.ws.readyState === WebSocket.OPEN) {
         client.ws.send(JSON.stringify(data));
-        console.log(`⚙️ Commande "${data.command}" → ${targetLampId} (MAC: ${mac})`);
+        console.log(`Commande "${data.command}" → ${targetLampId} (MAC: ${mac})`);
         sent = true;
         break;
       }
     }
-    if (!sent) console.warn(`⚠️ Lampadaire ${targetLampId} non connecté`);
+    if (!sent) console.warn(`Lampadaire ${targetLampId} non connecté`);
   } else {
     let count = 0;
     for (const [mac, client] of espClients.entries()) {
@@ -456,9 +435,8 @@ function handleCommand(data) {
         count++;
       }
     }
-    console.log(`📡 Commande "${data.command}" envoyée à ${count} lampadaires`);
+    console.log(`Commande "${data.command}" envoyée à ${count} lampadaires`);
   }
-
   broadcastToAndroid({
     type: 'command_sent',
     command: data.command,
@@ -468,9 +446,11 @@ function handleCommand(data) {
 
 function broadcastToAndroid(data) {
   const payload = JSON.stringify(data);
+  console.log(`Broadcasting à ${androidClients.length} clients Android`);
   androidClients.forEach(ws => {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(payload);
+      console.log('Message envoyé à un client Android');
     }
   });
 }
@@ -479,14 +459,13 @@ function broadcastToAndroid(data) {
 // DÉMARRAGE SERVEUR
 // ========================================
 server.listen(PORT, '0.0.0.0', async () => {
-  console.log(`🚀 Serveur démarré sur le port ${PORT}`);
-  console.log(`🔌 WebSocket actif sur ws://0.0.0.0:${PORT}`);
-
+  console.log(`Serveur démarré sur le port ${PORT}`);
+  console.log(`WebSocket actif sur ws://0.0.0.0:${PORT}`);
   const connected = await testConnection();
   if (connected) {
     await initDatabase();
   } else {
-    console.error('❌ Impossible d\'initialiser la base de données');
+    console.error('Impossible d\'initialiser la base de données');
   }
 });
 
@@ -494,9 +473,9 @@ server.listen(PORT, '0.0.0.0', async () => {
 // GESTION DES ERREURS GLOBALES
 // ========================================
 process.on('uncaughtException', (error) => {
-  console.error('❌ Erreur non gérée (uncaughtException):', error);
+  console.error('Erreur non gérée (uncaughtException):', error);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Promise rejetée (unhandledRejection):', reason);
+  console.error('Promise rejetée (unhandledRejection):', reason);
 });
