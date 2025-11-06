@@ -394,9 +394,9 @@ async function handleRegister(ws, data) {
           lampId: lamp.id,
           token: lamp.token,
           status: 'CONNECTED',
-          latitude: lamp.latitude,        // ✅ AJOUTÉ
-          longitude: lamp.longitude,      // ✅ AJOUTÉ
-          lieu: lamp.lieu_installation    // ✅ AJOUTÉ
+          latitude: lamp.latitude,        
+          longitude: lamp.longitude,      
+          lieu: lamp.lieu_installation    
         }));
         
         broadcastToAndroid({
