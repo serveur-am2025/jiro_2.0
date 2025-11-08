@@ -1,7 +1,6 @@
 // ========================================
 // SERVEUR IoT LAMPADAIRES - Render + PostgreSQL
 // Node.js + Express + PostgreSQL + WebSocket
-// ✅ VERSION CORRIGÉE : ID SÉQUENTIEL
 // ========================================
 require('dotenv').config();
 const express = require('express');
@@ -412,7 +411,7 @@ async function handleRegister(ws, data) {
           ['CONNECTED', -50, data.mac]
         );
         
-        //  ENVOYER LES COORDONNÉES À L'ESP32
+        // ✅ ENVOYER LES COORDONNÉES À L'ESP32
         ws.send(JSON.stringify({
           type: 'welcome',
           lampId: lamp.id,
@@ -489,13 +488,13 @@ function handleCommand(data) {
 
 function broadcastToAndroid(data) {
   const payload = JSON.stringify(data);
-  console.log(` Broadcasting à ${androidClients.length} clients Android`);
-  console.log(`Payload: ${payload}`);
+  console.log(`📡 Broadcasting à ${androidClients.length} clients Android`);
+  console.log(`📦 Payload: ${payload}`);
   
   androidClients.forEach(ws => {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(payload);
-      console.log(' Message envoyé à un client Android');
+      console.log('✅ Message envoyé à un client Android');
     }
   });
 }
