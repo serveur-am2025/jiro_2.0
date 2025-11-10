@@ -481,6 +481,14 @@ async function handleEspData(data) {
 
 function handleCommand(data) {
   const targetLampId = data.idLampadaire;
+  if (data.command === "wifi_config") {
+    console.log(`🔧 Commande WiFi reçue:`, {
+      ssid: data.ssid,
+      lampId: targetLampId,
+      clientsESP: espClients.size
+    });
+  }
+  
   if (targetLampId && targetLampId !== "0") {
     let sent = false;
     for (const [mac, client] of espClients.entries()) {
