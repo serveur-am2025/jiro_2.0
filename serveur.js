@@ -283,7 +283,7 @@ app.delete('/api/lampadaire/:id', async (req, res) => {
     broadcastToAndroid({ type: 'lamp_deleted', lampId: id });
     res.json({ success: true, message: 'Lampadaire supprimé' });
   } catch (error) {
-    console.error('❌ Erreur DELETE /api/lampadaire/:id:', error.message);
+    console.error(' Erreur DELETE /api/lampadaire/:id:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -308,49 +308,72 @@ wss.on('connection', (ws, req) => {
     }
   }, 30000);
 
-  ws.on('message', async (message) => {
+ ws.on('message', async (message) => {
     try {
-      const data = JSON.parse(message.toString());
-      switch (data.type) {
-        case 'register':
-          await handleRegister(ws, data);
-          break;
-        case 'esp_data':
-          await handleEspData(data);
-          break;
-        case 'command':
-          handleCommand(data);
-          break;
-        case 'interval_confirm':
-          broadcastToAndroid(data);
-          break;
-        case 'alert':
-          console.log(`🚨 Alerte reçue: ${data.titre} - ${data.message}`);
-          console.log(`📍 Lampadaire: ${data.idLampadaire}`);
-          console.log(`💡 État: ${data.lampState}, LDR: ${data.ldr || 'N/A'}`);
-          
-          const alertPayload = {
-            type: 'alert',
-            idLampadaire: data.idLampadaire,
-            titre: data.titre,
-            message: data.message,
-            lampState: data.lampState,
-            timestamp: data.timestamp || new Date().toISOString(),
-            ldr: data.ldr || 0,
-            latitude: data.latitude || 0,
-            longitude: data.longitude || 0,
-            lieu: data.lieu || 'Unknown'
-          };
-          
-          broadcastToAndroid(alertPayload);
-          break;
-        default:
-          console.log(`⚠️ Type de message inconnu: ${data.type}`);
-      }
+        const data = JSON.parse(message.toString());
+        
+        switch (data.type) {
+            case 'register':
+                await handleRegister(ws, data);
+                break;
+                
+            case 'esp_data':
+                await handleEspData(data);
+                break;
+                
+            case 'command':
+                handleCommand(data);
+                break;
+                
+            // CONFIRMATION WIFI
+            case 'wifi_confirm':
+                console.log(` Config WiFi confirmée:`);
+                console.log(`   Lamp: ${data.idLampadaire}`);
+                console.log(`   SSID: ${data.ssid}`);
+                console.log(`   Status: ${data.status}`);
+                
+                // Broadcast aux clients Android
+                broadcastToAndroid({
+                    type: 'wifi_confirm',
+                    idLampadaire: data.idLampadaire,
+                    ssid: data.ssid,
+                    status: data.status,
+                    timestamp: new Date().toISOString()
+                });
+                break;
+                
+            case 'interval_confirm':
+                broadcastToAndroid(data);
+                break;
+                
+            case 'alert':
+                console.log(` Alerte reçue: ${data.titre} - ${data.message}`);
+                console.log(` Lampadaire: ${data.idLampadaire}`);
+                console.log(` État: ${data.lampState}, LDR: ${data.ldr || 'N/A'}`);
+                
+                const alertPayload = {
+                    type: 'alert',
+                    idLampadaire: data.idLampadaire,
+                    titre: data.titre,
+                    message: data.message,
+                    lampState: data.lampState,
+                    timestamp: data.timestamp || new Date().toISOString(),
+                    ldr: data.ldr || 0,
+                    latitude: data.latitude || 0,
+                    longitude: data.longitude || 0,
+                    lieu: data.lieu || 'Unknown'
+                };
+                
+                broadcastToAndroid(alertPayload);
+                break;
+                
+            default:
+                console.log(` Type de message inconnu: ${data.type}`);
+        }
     } catch (error) {
-      console.error('❌ Erreur parsing message WebSocket:', error.message);
+        console.error(' Erreur parsing message WebSocket:', error.message);
     }
-  });
+});
 
   ws.on('close', () => {
     clearInterval(pingInterval);
