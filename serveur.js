@@ -484,6 +484,7 @@ function handleCommand(data) {
   if (data.command === "wifi_config") {
     console.log(`🔧 Commande WiFi reçue:`, {
       ssid: data.ssid,
+       password: '***',
       lampId: targetLampId,
       clientsESP: espClients.size
     });
